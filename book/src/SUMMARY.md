@@ -35,3 +35,4 @@
   - [Adding injection queries](./guides/injection.md)
   - [Adding tags queries](./guides/tags.md)
   - [Adding rainbow bracket queries](./guides/rainbow_bracket_queries.md)
+  - [Making your first steel plugin](./guides/steel_plugins.md)
