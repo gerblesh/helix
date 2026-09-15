@@ -143,20 +143,105 @@ Start by adding your requires at the top
 ;; snippets.scm
 (require "helix/editor.scm")
 (require "helix/misc.scm")
-
 ```
 
+Then, draw the rest of the owl...
 ```scheme
 ;; snippets.scm
 (require "helix/editor.scm")
 (require "helix/misc.scm")
+(require "helix/components.scm")
+(require (prefix-in hx. "helix/static.scm"))
 
-(struct SnippetsState (snippets) #:mutable)
+(struct SnippetsState (selected) #:mutable)
+
+(define TITLE-TEXT "Snippets: [0-9] paste a snippet, [c]lear snippets, [a]dd a snippet")
+(define *snippets-list* '())
+
+(define (calculate-popup-area rect snippets)
+  (let* ([rect-width (area-width rect)]
+         [rect-height (area-height rect)]
+         [width (max (+ (if (not (empty? snippets))
+                                (max (apply max (map (lambda (x) (string-length x)) snippets)) 8)
+                                (string-length TITLE-TEXT))
+                            6)
+                     (- rect-width 4))]
+         [height (min (+ (max (length snippets) 1) 3)
+                      (- rect-height 4))]
+         [x (ceiling (max 0 (- (ceiling (/ rect-width 2)) (floor (/ width 2)))))]
+         [y (ceiling (max 0 (- (ceiling (/ rect-height 2)) (floor (/ height 2)))))])
+    (area (- x 1) (- y 1) width height)))
+
+
+(define (calculate-text-area popup-area)
+  (let ([padding-x 2]
+        [padding-y 1])
+    (area (+ (area-x popup-area) padding-x)
+          (+ (area-y popup-area) padding-y)
+          (- (area-width popup-area) (* padding-x 2))
+          (- (area-height popup-area) (* padding-y 2)))))
+
+(define (render-snippets state area buf)
+  (let* ([popup-style (theme-scope-ref "ui.popup")]
+         [linenr-selected (theme-scope-ref "ui.linenr.selected")]
+         [linenr (theme-scope-ref "ui.linenr")]
+         [popup-area (calculate-popup-area area *snippets-list*)]
+         [text-area (calculate-text-area popup-area)])
+    (buffer/clear buf popup-area)
+    (block/render buf popup-area (make-block (style) popup-style "all" "plain"))
+    (frame-set-string! buf (area-x text-area) (area-y text-area) TITLE-TEXT popup-style)
+    (for-each (lambda (i)
+                (begin
+                  (frame-set-string!
+                    buf
+                    (+ (area-x text-area) 2) (+ (area-y text-area) i 1)
+                    (list-ref *snippets-list* i)
+                    popup-style)
+                  (frame-set-string!
+                    buf
+                    (+ (area-x text-area)) (+ (area-y text-area) i 1)
+                    (number->string (modulo (add1 i) 10))
+                    (if (= i (SnippetsState-selected state)) linenr-selected linenr))))
+              (range (length *snippets-list*)))))
+
+(define (handle-event state event)
+  (cond
+    [(key-event-escape? event) event-result/close]
+    [(equal? (key-event-char event) #\q) event-result/close]
+    [(number? (char->number (or (key-event-char event) #\null)))
+     (let* ([i (modulo (sub1 (char->number (key-event-char event))) 10)]
+            [snip (try-list-ref *snippets-list* i)])
+        (if (string? snip)
+            (begin
+              (set-SnippetsState-selected! state i)
+              (set-status! (string-append "Inserted: " snip))
+              (hx.insert_string snip)
+              event-result/consume)
+            (set-status! "Unable to insert!")))]
+    [(equal? (key-event-char event) #\a) (begin
+       (push-component! (prompt "Add snippet:"
+                                (lambda (snip)
+                                  (if (> 10 (length *snippets-list* ))
+                                    (begin
+                                      (set-status! (string-append "Snippet added"))
+                                      (set! *snippets-list*
+                                        (cons snip *snippets-list*)))
+                                    (set-status! (string-append "Too many snippets! Try clearing with [c]"))))))
+       event-result/consume)]
+
+    [(equal? (key-event-char event) #\c) (begin (set! *snippets-list* '()) (set-status! "Snippets cleared!") event-result/consume)]
+    [else event-result/ignore]))
+
+
+;;@doc Open Snippets list
+(define (open-snippets)
+  (push-component!
+   (new-component! "snippets" (SnippetsState 0) render-snippets (hash "handle_event" handle-event))))
 ```
 
 ## [Tree-sitter]
 
-Helix also provides a [Tree-sitter] module `"helix/treesitter.scm"`. There are two "modes" of using [Tree-sitter], you can either use an existing [Tree-sitter] parse tree from a document, or construct your own.
+Helix also provides a [Tree-sitter] module `"helix/treesitter.scm"`. There are two ways of using the [Tree-sitter] module, you can either use an existing [Tree-sitter] parse tree from a document, or construct your own syntax tree
 
 Here's a couple of common examples of things you may want to do with treesitter.
 
